@@ -12,6 +12,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Font Awesome voor duidelijke iconen -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Leaflet.js Kaart CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -37,6 +40,38 @@
             background: #cbd5e1;
             border-radius: 999px;
         }
+        #map-container {
+            height: 290px;
+            transition: height 0.25s ease;
+            z-index: 10;
+        }
+        #map-container.map-expanded {
+            height: 460px;
+        }
+        .gps-pulse-dot {
+            width: 18px;
+            height: 18px;
+            background: #2563eb;
+            border: 3px solid #ffffff;
+            border-radius: 50%;
+            box-shadow: 0 0 0 rgba(37, 99, 235, 0.6);
+            animation: gpsPulse 2s infinite;
+        }
+        @keyframes gpsPulse {
+            0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.65); }
+            70% { box-shadow: 0 0 0 16px rgba(37, 99, 235, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+        }
+        .leaflet-popup-content-wrapper {
+            border-radius: 16px !important;
+            padding: 2px !important;
+            box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.25) !important;
+        }
+        .leaflet-popup-content {
+            margin: 12px 14px !important;
+            font-family: 'Inter', sans-serif !important;
+            min-width: 215px;
+        }
     </style>
 </head>
 <body class="antialiased pb-20">
@@ -54,6 +89,10 @@
                 </div>
             </div>
             <div class="flex items-center gap-1.5 shrink-0">
+                <button onclick="useCurrentGPS()" title="Centreer op mijn GPS" class="bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold px-2.5 py-1.5 rounded-full flex items-center gap-1.5 transition">
+                    <i class="fa-solid fa-location-crosshairs"></i>
+                    <span>GPS</span>
+                </button>
                 <span id="data-source-badge" class="text-[11px] bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-1 rounded-full font-medium">
                     <i class="fa-solid fa-satellite-dish text-emerald-400 mr-1"></i>Live OSM
                 </span>
@@ -107,6 +146,37 @@
     </div>
 
     <main class="max-w-3xl mx-auto px-3 sm:px-4 pt-4 space-y-4">
+
+        <!-- 0. Interactieve GPS Kaart -->
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="relative">
+                <div id="map-container" class="w-full bg-slate-200"></div>
+
+                <!-- Zwevende Kaartknoppen -->
+                <div class="absolute top-3 right-3 z-[400] flex flex-col gap-2">
+                    <button onclick="useCurrentGPS()" class="bg-white hover:bg-slate-50 active:scale-95 text-blue-600 border border-slate-200 shadow-md rounded-xl px-3 py-2 text-xs font-extrabold flex items-center gap-1.5" title="Mijn GPS-locatie">
+                        <i class="fa-solid fa-location-crosshairs text-sm"></i>
+                        <span>Mijn GPS</span>
+                    </button>
+                    <button id="btn-toggle-map" onclick="toggleMapHeight()" class="bg-white hover:bg-slate-50 active:scale-95 text-slate-700 border border-slate-200 shadow-md rounded-xl px-3 py-2 text-xs font-bold flex items-center justify-center gap-1.5" title="Kaart vergroten of verkleinen">
+                        <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+                        <span id="toggle-map-label">Groter</span>
+                    </button>
+                </div>
+
+                <!-- Kaart Legenda onderin -->
+                <div class="absolute bottom-2.5 left-2.5 right-2.5 z-[400] pointer-events-none flex flex-wrap items-center justify-between gap-1.5">
+                    <div class="bg-slate-900/85 backdrop-blur-xs text-white px-2.5 py-1 rounded-lg text-[10px] font-semibold flex items-center gap-2.5 shadow-sm">
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block"></span>ANWB wint</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span>Eneco wint</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span>Vattenfall wint</span>
+                    </div>
+                    <span class="bg-white/90 text-slate-700 px-2 py-1 rounded-lg text-[10px] font-semibold shadow-xs hidden sm:inline">
+                        Tik op kaart om zoekpunt te verplaatsen
+                    </span>
+                </div>
+            </div>
+        </section>
 
         <!-- 1. Locatie & Directe GPS Knop (Duimvriendelijk) -->
         <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
@@ -275,8 +345,200 @@
             },
             stations: [],
             editingStationId: null,
+            selectedStationId: null,
             overrides: loadOverrides()
         };
+
+        let map = null;
+        let userMarker = null;
+        let userAccuracyCircle = null;
+        let stationMarkersLayer = null;
+        let stationMarkersById = {};
+        let isMapExpanded = false;
+
+        function initMap() {
+            map = L.map('map-container', {
+                zoomControl: true,
+                attributionControl: true
+            }).setView([state.lat, state.lng], 15);
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap &copy; CARTO',
+                subdomains: 'abcd',
+                maxZoom: 19
+            }).addTo(map);
+
+            stationMarkersLayer = L.layerGroup().addTo(map);
+
+            // Tik op de kaart om laadpalen rondom dat nieuwe punt te zoeken
+            map.on('click', async (e) => {
+                const { lat, lng } = e.latlng;
+                setUserMarkerOnMap(lat, lng, null);
+                let label = `Gekozen punt (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=15&addressdetails=1`, {
+                        headers: { 'Accept-Language': 'nl' }
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        const a = data.address || {};
+                        const city = a.city || a.town || a.village || a.municipality || '';
+                        const road = a.road || '';
+                        if (city || road) {
+                            label = [city, road].filter(Boolean).join(', ');
+                        }
+                    }
+                } catch (err) {}
+                document.getElementById('location-input').value = label;
+                updateLocation(lat, lng, label, false);
+            });
+
+            setUserMarkerOnMap(state.lat, state.lng, null);
+        }
+
+        function setUserMarkerOnMap(lat, lng, accuracyMeters) {
+            if (!map) return;
+
+            if (userMarker) {
+                userMarker.setLatLng([lat, lng]);
+            } else {
+                const gpsIcon = L.divIcon({
+                    className: 'custom-gps-marker',
+                    html: '<div class="gps-pulse-dot"></div>',
+                    iconSize: [18, 18],
+                    iconAnchor: [9, 9]
+                });
+                userMarker = L.marker([lat, lng], { icon: gpsIcon, zIndexOffset: 1000 })
+                    .addTo(map)
+                    .bindPopup('<strong>Jouw huidige locatie</strong>');
+            }
+
+            if (userAccuracyCircle) {
+                map.removeLayer(userAccuracyCircle);
+                userAccuracyCircle = null;
+            }
+
+            if (accuracyMeters && accuracyMeters > 10 && accuracyMeters < 1500) {
+                userAccuracyCircle = L.circle([lat, lng], {
+                    radius: accuracyMeters,
+                    color: '#2563eb',
+                    fillColor: '#3b82f6',
+                    fillOpacity: 0.12,
+                    weight: 1.5
+                }).addTo(map);
+            }
+        }
+
+        function toggleMapHeight() {
+            const container = document.getElementById('map-container');
+            const label = document.getElementById('toggle-map-label');
+            isMapExpanded = !isMapExpanded;
+            if (isMapExpanded) {
+                container.classList.add('map-expanded');
+                label.textContent = 'Kleiner';
+            } else {
+                container.classList.remove('map-expanded');
+                label.textContent = 'Groter';
+            }
+            setTimeout(() => {
+                if (map) map.invalidateSize();
+            }, 260);
+        }
+
+        function focusStationOnMap(stationId) {
+            state.selectedStationId = stationId;
+            const station = state.stations.find(s => s.id === stationId);
+            const marker = stationMarkersById[stationId];
+            if (station && map) {
+                document.getElementById('map-container').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                map.flyTo([station.lat, station.lng], 16, { duration: 0.6 });
+                if (marker) {
+                    setTimeout(() => marker.openPopup(), 350);
+                }
+            }
+            renderStations();
+        }
+
+        function highlightCardInList(stationId) {
+            state.selectedStationId = stationId;
+            renderStations();
+            const cardEl = document.getElementById(`station-card-${stationId}`);
+            if (cardEl) {
+                cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        function updateMapMarkers(filteredStations) {
+            if (!map || !stationMarkersLayer) return;
+            stationMarkersLayer.clearLayers();
+            stationMarkersById = {};
+
+            filteredStations.forEach(station => {
+                const { results, effectiveCpo } = calculateCardPrices(station);
+                const best = results[0];
+                const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${station.lat},${station.lng}`;
+
+                let pinBg = '#0284c7'; // sky-600 (ANWB)
+                let shortWinner = 'ANWB';
+                if (best) {
+                    if (best.id === 'eneco') {
+                        pinBg = '#e11d48'; // rose-600
+                        shortWinner = 'Eneco';
+                    } else if (best.id === 'vattenfall') {
+                        pinBg = '#d97706'; // amber-600
+                        shortWinner = 'Vattenfall';
+                    }
+                }
+
+                const priceLabel = best ? formatEuro(best.total) : '—';
+                const pinHtml = `
+                    <div style="background:${pinBg};color:#fff;border:2.5px solid #fff;border-radius:999px;padding:3px 8px;font-family:Inter,sans-serif;font-weight:800;font-size:11px;white-space:nowrap;box-shadow:0 4px 10px rgba(15,23,42,0.35);display:inline-flex;align-items:center;gap:4px;transform:translate(-50%,-50%);">
+                        <span>${priceLabel}</span>
+                    </div>
+                `;
+
+                const icon = L.divIcon({
+                    className: 'custom-price-pin',
+                    html: pinHtml,
+                    iconSize: [0, 0],
+                    iconAnchor: [0, 0]
+                });
+
+                const popupRows = results.map((r, i) => `
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;border-radius:8px;margin-top:4px;background:${i === 0 ? '#ecfdf5' : '#f8fafc'};border:1px solid ${i === 0 ? '#6ee7b7' : '#e2e8f0'};">
+                        <span style="font-size:11px;font-weight:${i === 0 ? '800' : '600'};color:#0f172a;">${i === 0 ? '🏆 ' : ''}${r.name.replace(' Laadpas', '').replace(' eMobility', '').replace(' InCharge', '')}</span>
+                        <span style="font-size:11px;font-weight:800;color:${i === 0 ? '#047857' : '#334155'};">${formatEuro(r.total)} <span style="font-weight:500;font-size:10px;color:#64748b;">(${formatRate(r.ratePerKwh)})</span></span>
+                    </div>
+                `).join('');
+
+                const popupHtml = `
+                    <div>
+                        <div style="font-size:10px;font-weight:800;text-transform:uppercase;color:#2563eb;margin-bottom:2px;">${station.type} • ${effectiveCpo} • ${formatDistance(station.distanceMeters)}</div>
+                        <div style="font-size:13px;font-weight:800;color:#0f172a;line-height:1.25;margin-bottom:6px;">${station.name}</div>
+                        <div style="font-size:11px;color:#475569;margin-bottom:4px;">Laadbeurt <strong>${state.kwh} kWh</strong> (${shortWinner} voordeligst):</div>
+                        ${popupRows}
+                        <div style="display:flex;gap:6px;margin-top:8px;">
+                            <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="flex:1;text-align:center;background:#2563eb;color:#fff;font-size:11px;font-weight:700;padding:6px 8px;border-radius:8px;text-decoration:none;">
+                                Navigeer (Maps)
+                            </a>
+                            <button onclick="openEditModal('${station.id}')" style="background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;font-size:11px;font-weight:700;padding:6px 8px;border-radius:8px;cursor:pointer;">
+                                Tarief
+                            </button>
+                        </div>
+                    </div>
+                `;
+
+                const marker = L.marker([station.lat, station.lng], { icon })
+                    .addTo(stationMarkersLayer)
+                    .bindPopup(popupHtml);
+
+                marker.on('click', () => {
+                    highlightCardInList(station.id);
+                });
+
+                stationMarkersById[station.id] = marker;
+            });
+        }
 
         function loadOverrides() {
             try {
@@ -569,9 +831,9 @@
         // =========================================================================
         // GPS & GEOCODING
         // =========================================================================
-        function useCurrentGPS() {
+        function useCurrentGPS(silentOnError = false) {
             if (!navigator.geolocation) {
-                showToast('GPS wordt niet ondersteund op dit apparaat.', 'error');
+                if (!silentOnError) showToast('GPS wordt niet ondersteund op dit apparaat.', 'error');
                 return;
             }
             const btn = document.getElementById('btn-gps');
@@ -581,7 +843,12 @@
 
             navigator.geolocation.getCurrentPosition(
                 async (pos) => {
-                    const { latitude, longitude } = pos.coords;
+                    const { latitude, longitude, accuracy } = pos.coords;
+                    setUserMarkerOnMap(latitude, longitude, accuracy);
+                    if (map) {
+                        map.flyTo([latitude, longitude], 15, { duration: 0.8 });
+                    }
+
                     let name = `GPS (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
                     try {
                         const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=14&addressdetails=1`, {
@@ -597,15 +864,17 @@
                     } catch (e) {}
 
                     document.getElementById('location-input').value = name;
-                    updateLocation(latitude, longitude, name);
+                    updateLocation(latitude, longitude, name, false);
                     btn.innerHTML = orig;
                     btn.disabled = false;
-                    showToast(`Laadpalen geladen bij ${name}`, 'success');
+                    showToast(`GPS-locatie gevonden: ${name}`, 'success');
                 },
                 () => {
                     btn.innerHTML = orig;
                     btn.disabled = false;
-                    showToast('Geen GPS-toegang. Geef locatietoestemming of kies een plaats.', 'error');
+                    if (!silentOnError) {
+                        showToast('Geen GPS-toegang. Geef locatietoestemming of kies een plaats.', 'error');
+                    }
                 },
                 { enableHighAccuracy: true, timeout: 10000 }
             );
@@ -638,12 +907,16 @@
             updateLocation(lat, lng, name);
         }
 
-        function updateLocation(lat, lng, name) {
+        function updateLocation(lat, lng, name, recenterMap = true) {
             state.lat = lat;
             state.lng = lng;
             state.locationName = name;
             document.getElementById('current-city-text').textContent = name;
             document.getElementById('link-laadprijzen').href = `https://laadprijzen.nl/?q=${encodeURIComponent(name)}`;
+            setUserMarkerOnMap(lat, lng, null);
+            if (recenterMap && map) {
+                map.flyTo([lat, lng], 15, { duration: 0.7 });
+            }
             fetchRealStations(lat, lng, name);
         }
 
@@ -723,6 +996,9 @@
             const filtered = state.stations.filter(s => typeFilter === 'ALL' || s.type === typeFilter);
             document.getElementById('station-count').textContent = filtered.length;
 
+            // Synchroniseer alle pins en prijzen direct op de kaart
+            updateMapMarkers(filtered);
+
             const grid = document.getElementById('stations-grid');
             if (filtered.length === 0) {
                 grid.innerHTML = `<div class="bg-white rounded-2xl border border-slate-200 p-6 text-center text-sm text-slate-600">Geen laadpalen gevonden voor dit filter.</div>`;
@@ -732,6 +1008,7 @@
             grid.innerHTML = filtered.map(station => {
                 const { results, effectiveCpo, isOverridden } = calculateCardPrices(station);
                 const best = results[0];
+                const isSelected = state.selectedStationId === station.id;
                 const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${station.lat},${station.lng}`;
 
                 const typeBadge = station.type === 'DC'
@@ -764,7 +1041,7 @@
                 }).join('');
 
                 return `
-                    <article class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 space-y-3">
+                    <article id="station-card-${station.id}" class="bg-white rounded-2xl shadow-sm border-2 ${isSelected ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'} p-4 space-y-3 transition">
                         <div class="flex items-start justify-between gap-2">
                             <div class="min-w-0">
                                 <div class="flex flex-wrap items-center gap-1.5 mb-1">
@@ -776,8 +1053,11 @@
                                 <p class="text-xs text-slate-500 mt-0.5">${station.power} • Op <strong>${formatDistance(station.distanceMeters)}</strong></p>
                             </div>
                             <div class="flex items-center gap-1.5 shrink-0">
+                                <button onclick="focusStationOnMap('${station.id}')" class="px-2.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold" title="Toon op kaart">
+                                    <i class="fa-solid fa-map-pin"></i> Kaart
+                                </button>
                                 <button onclick="openEditModal('${station.id}')" class="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold" title="Paaltarief aanpassen">
-                                    <i class="fa-solid fa-pen"></i> Tarief
+                                    <i class="fa-solid fa-pen"></i>
                                 </button>
                                 <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" class="px-3 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold" title="Open route in Google Maps">
                                     <i class="fa-solid fa-diamond-turn-right"></i> Route
@@ -803,7 +1083,10 @@
         }
 
         window.addEventListener('DOMContentLoaded', () => {
+            initMap();
             fetchRealStations(state.lat, state.lng, state.locationName);
+            // Vraag bij openen direct je GPS-locatie op
+            useCurrentGPS(true);
         });
     </script>
 </body>
