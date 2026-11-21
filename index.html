@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slim Laden NL — Laadpas & Tarieven Vergelijker op Locatie</title>
+    <!-- Tailwind CSS via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Font Awesome voor duidelijke iconen -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f1f5f9;
+            color: #0f172a;
+            -webkit-tap-highlight-color: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 26px;
+            width: 26px;
+            border-radius: 50%;
+            background: #2563eb;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.45);
+            margin-top: -9px;
+            border: 3px solid #ffffff;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 8px;
+            cursor: pointer;
+            background: #cbd5e1;
+            border-radius: 999px;
+        }
+    </style>
+</head>
+<body class="antialiased pb-20">
+
+    <!-- Top Navigatiebalk -->
+    <header class="bg-slate-900 text-white sticky top-0 z-30 shadow-md">
+        <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2.5 min-w-0">
+                <div class="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center text-slate-950 font-bold text-lg shrink-0">
+                    <i class="fa-solid fa-bolt"></i>
+                </div>
+                <div class="min-w-0">
+                    <h1 class="font-extrabold text-base leading-tight tracking-tight truncate">Slim Laden <span class="text-emerald-400">NL</span></h1>
+                    <p class="text-[11px] text-slate-300 truncate">ANWB • Eneco • Vattenfall Vergelijker</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+                <span id="data-source-badge" class="text-[11px] bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-1 rounded-full font-medium">
+                    <i class="fa-solid fa-satellite-dish text-emerald-400 mr-1"></i>Live OSM
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Toast Notificaties -->
+    <div id="toast-container" class="fixed bottom-4 left-4 right-4 max-w-md mx-auto z-50 pointer-events-none flex flex-col gap-2"></div>
+
+    <!-- Modal om handmatig een paaltarief aan te passen -->
+    <div id="edit-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full p-5 shadow-xl border border-slate-200">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="font-bold text-base text-slate-900">Paaltarief handmatig aanpassen</h3>
+                <button onclick="closeEditModal()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <p id="modal-station-title" class="text-xs font-semibold text-blue-700 bg-blue-50 px-3 py-2 rounded-xl mb-4"></p>
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Exploitant (CPO)</label>
+                    <select id="modal-cpo" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-medium">
+                        <option value="Vattenfall InCharge">Vattenfall InCharge</option>
+                        <option value="Eneco eMobility">Eneco eMobility</option>
+                        <option value="EQUANS">EQUANS</option>
+                        <option value="Allego">Allego</option>
+                        <option value="TotalEnergies">TotalEnergies</option>
+                        <option value="Shell Recharge">Shell Recharge</option>
+                        <option value="PitPoint">PitPoint</option>
+                        <option value="Fastned">Fastned</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Actueel CPO-tarief op deze paal (€ per kWh)</label>
+                    <input id="modal-rate" type="number" step="0.0001" min="0.05" max="1.50" placeholder="Bijv. 0.34"
+                        class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-bold">
+                    <p class="text-[11px] text-slate-500 mt-1">Wordt lokaal op je telefoon opgeslagen voor deze paal.</p>
+                </div>
+            </div>
+            <div class="flex gap-2 mt-5">
+                <button onclick="resetStationOverride()" class="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold">
+                    Herstel standaard
+                </button>
+                <button onclick="saveStationOverride()" class="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm">
+                    Tarief opslaan
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <main class="max-w-3xl mx-auto px-3 sm:px-4 pt-4 space-y-4">
+
+        <!-- 1. Locatie & Directe GPS Knop (Duimvriendelijk) -->
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+            <button id="btn-gps" onclick="useCurrentGPS()" class="w-full flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-bold py-3.5 px-4 rounded-xl shadow-sm transition text-sm sm:text-base mb-3">
+                <i class="fa-solid fa-location-crosshairs text-lg"></i>
+                <span>Gebruik mijn huidige GPS-locatie</span>
+            </button>
+
+            <div class="flex gap-2 mb-3">
+                <div class="relative flex-1">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                    <input id="location-input" type="text" placeholder="Plaats of postcode (bijv. Diemen, 1012JS)..." value="Amsterdam"
+                        onkeydown="if(event.key==='Enter') searchLocation()"
+                        class="w-full pl-9 pr-3 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white">
+                </div>
+                <button onclick="searchLocation()" class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-4 py-3 rounded-xl text-sm shrink-0">
+                    Zoek
+                </button>
+            </div>
+
+            <!-- Snelkeuze Regio-knoppen -->
+            <div class="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                <button onclick="quickCity('Amsterdam', 52.3676, 4.9041)" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 rounded-xl text-xs font-semibold shrink-0">Amsterdam</button>
+                <button onclick="quickCity('Diemen', 52.3395, 4.9592)" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 rounded-xl text-xs font-semibold shrink-0">Diemen</button>
+                <button onclick="quickCity('Weesp', 52.3075, 5.0417)" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 rounded-xl text-xs font-semibold shrink-0">Weesp</button>
+                <button onclick="quickCity('Schiphol', 52.3105, 4.7683)" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 rounded-xl text-xs font-semibold shrink-0">Schiphol</button>
+                <button onclick="quickCity('Utrecht', 52.0907, 5.1214)" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 rounded-xl text-xs font-semibold shrink-0">Utrecht</button>
+                <button onclick="quickCity('Rotterdam', 51.9244, 4.4777)" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 rounded-xl text-xs font-semibold shrink-0">Rotterdam</button>
+            </div>
+        </section>
+
+        <!-- 2. PHEV Laadbeurt (kWh) & Actieve Laadpassen -->
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 space-y-4">
+            <!-- kWh Schuifregelaar -->
+            <div class="bg-slate-50 rounded-xl p-3.5 border border-slate-200">
+                <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-bold text-slate-700 uppercase tracking-wide">Gewenste laadbeurt (PHEV / EV)</span>
+                    <span class="bg-blue-600 text-white font-extrabold text-sm px-3 py-1 rounded-lg shadow-xs">
+                        <span id="kwh-display">18</span> kWh
+                    </span>
+                </div>
+                <input id="kwh-slider" type="range" min="5" max="80" step="1" value="18" oninput="updateKwh(this.value)" class="w-full my-2.5">
+                <div class="grid grid-cols-4 gap-1.5 mt-1">
+                    <button onclick="setKwh(10)" class="py-1.5 bg-white hover:bg-blue-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700">10 kWh</button>
+                    <button onclick="setKwh(18)" class="py-1.5 bg-blue-50 border border-blue-300 rounded-lg text-xs font-bold text-blue-800">18 kWh (PHEV)</button>
+                    <button onclick="setKwh(35)" class="py-1.5 bg-white hover:bg-blue-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700">35 kWh</button>
+                    <button onclick="setKwh(60)" class="py-1.5 bg-white hover:bg-blue-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700">60 kWh</button>
+                </div>
+            </div>
+
+            <!-- 3 Laadpas Toggles (Compact voor mobiel) -->
+            <div class="grid grid-cols-3 gap-2">
+                <label class="cursor-pointer bg-sky-50 border-2 border-sky-200 rounded-xl p-2.5 flex flex-col justify-between">
+                    <div class="flex items-center justify-between gap-1 mb-1">
+                        <span class="font-extrabold text-xs text-sky-950">ANWB</span>
+                        <input id="toggle-anwb" type="checkbox" checked onchange="recalculateAll()" class="w-4 h-4 accent-sky-600">
+                    </div>
+                    <span class="text-[10px] font-bold text-sky-800 bg-sky-200/70 px-1.5 py-0.5 rounded w-fit mb-1">Met abo</span>
+                    <span class="text-[10px] text-slate-600 leading-tight">€0 start • 1-op-1 CPO • 10% Fastned</span>
+                </label>
+
+                <label class="cursor-pointer bg-rose-50 border-2 border-rose-200 rounded-xl p-2.5 flex flex-col justify-between">
+                    <div class="flex items-center justify-between gap-1 mb-1">
+                        <span class="font-extrabold text-xs text-rose-950">Eneco</span>
+                        <input id="toggle-eneco" type="checkbox" checked onchange="recalculateAll()" class="w-4 h-4 accent-rose-600">
+                    </div>
+                    <span class="text-[10px] font-bold text-rose-800 bg-rose-200/70 px-1.5 py-0.5 rounded w-fit mb-1">Met abo</span>
+                    <span class="text-[10px] text-slate-600 leading-tight">€0 start • Vaste CPO-staffels</span>
+                </label>
+
+                <label class="cursor-pointer bg-amber-50 border-2 border-amber-200 rounded-xl p-2.5 flex flex-col justify-between">
+                    <div class="flex items-center justify-between gap-1 mb-1">
+                        <span class="font-extrabold text-xs text-amber-950">Vattenfall</span>
+                        <input id="toggle-vattenfall" type="checkbox" checked onchange="recalculateAll()" class="w-4 h-4 accent-amber-500">
+                    </div>
+                    <span class="text-[10px] font-bold text-amber-900 bg-amber-200/70 px-1.5 py-0.5 rounded w-fit mb-1">Geen abo</span>
+                    <span class="text-[10px] text-slate-600 leading-tight">€0 eigen paal • €0,35 elders</span>
+                </label>
+            </div>
+
+            <!-- Vattenfall Piek / Dal schakelaar -->
+            <div class="flex items-center justify-between bg-slate-50 px-3 py-2.5 rounded-xl border border-slate-200">
+                <div class="text-xs">
+                    <span class="font-bold text-slate-800 block">MRA / Vattenfall Tijdstip</span>
+                    <span class="text-[11px] text-slate-500">Piek (17–23u): €0,3594 • Dal: €0,3394</span>
+                </div>
+                <select id="time-tariff" onchange="recalculateAll()" class="bg-white border border-slate-300 rounded-lg text-xs font-bold px-2.5 py-2 text-slate-800">
+                    <option value="dal" selected>Daluren</option>
+                    <option value="piek">Piek (17-23u)</option>
+                </select>
+            </div>
+        </section>
+
+        <!-- 3. Laadpalen Lijst & Filters -->
+        <section class="space-y-3">
+            <div class="flex items-center justify-between gap-2 px-1">
+                <div>
+                    <h2 class="text-base font-extrabold text-slate-900">
+                        Laadpalen bij <span id="current-city-text" class="text-blue-600">Amsterdam</span> (<span id="station-count">0</span>)
+                    </h2>
+                    <p class="text-[11px] text-slate-500">Gesorteerd op afstand • Tik op 'Tarief' om paalprijs bij te stellen</p>
+                </div>
+                <select id="filter-type" onchange="renderStations()" class="bg-white border border-slate-300 rounded-xl text-xs font-bold px-3 py-2 text-slate-800 shadow-xs">
+                    <option value="ALL">Alle (AC & DC)</option>
+                    <option value="AC">AC (PHEV / Normaal)</option>
+                    <option value="DC">DC (Snelladers)</option>
+                </select>
+            </div>
+
+            <!-- Laadstatus indicator -->
+            <div id="loading-indicator" class="hidden bg-white rounded-2xl border border-slate-200 p-6 text-center">
+                <i class="fa-solid fa-circle-notch fa-spin text-2xl text-blue-600 mb-2"></i>
+                <p class="text-sm font-bold text-slate-800">Live laadpalen ophalen in de buurt...</p>
+                <p class="text-xs text-slate-500">Zoeken via OpenStreetMap Overpass API</p>
+            </div>
+
+            <!-- Kaarten Container -->
+            <div id="stations-grid" class="space-y-3"></div>
+        </section>
+
+        <!-- 4. Snelle Externe Tarievenkaarten -->
+        <section class="bg-slate-900 text-white rounded-2xl p-4 space-y-2.5">
+            <div class="text-xs font-bold text-slate-300 uppercase tracking-wider">Controleer actuele CPO-prijs op externe kaart:</div>
+            <div class="grid grid-cols-2 gap-2">
+                <a id="link-laadprijzen" href="https://laadprijzen.nl/" target="_blank" rel="noopener noreferrer"
+                   class="bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold flex items-center justify-between">
+                    <span><i class="fa-solid fa-bolt text-emerald-400 mr-1.5"></i>Laadprijzen.nl</span>
+                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-400"></i>
+                </a>
+                <a href="https://incharge.vattenfall.nl/laadpalen" target="_blank" rel="noopener noreferrer"
+                   class="bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold flex items-center justify-between">
+                    <span><i class="fa-solid fa-plug text-amber-400 mr-1.5"></i>Vattenfall Kaart</span>
+                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-400"></i>
+                </a>
+                <a href="https://www.eneco-emobility.com/nl/laadpunten" target="_blank" rel="noopener noreferrer"
+                   class="bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold flex items-center justify-between">
+                    <span><i class="fa-solid fa-leaf text-rose-400 mr-1.5"></i>Eneco Kaart</span>
+                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-400"></i>
+                </a>
+                <a href="https://www.anwb.nl/auto/elektrisch-rijden/laadpalen" target="_blank" rel="noopener noreferrer"
+                   class="bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold flex items-center justify-between">
+                    <span><i class="fa-solid fa-car text-sky-400 mr-1.5"></i>ANWB Onderweg</span>
+                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-400"></i>
+                </a>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        // =========================================================================
+        // STATE & LOCALSTORAGE VOOR HANDMATIGE TARIEF-OVERRIDES
+        // =========================================================================
+        const STORAGE_KEY = 'slim_laden_nl_overrides_v1';
+
+        let state = {
+            lat: 52.3676,
+            lng: 4.9041,
+            locationName: 'Amsterdam',
+            kwh: 18,
+            timeTariff: 'dal',
+            activeCards: {
+                anwb: true,
+                eneco: true,
+                vattenfall: true
+            },
+            stations: [],
+            editingStationId: null,
+            overrides: loadOverrides()
+        };
+
+        function loadOverrides() {
+            try {
+                return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function saveOverridesToStorage() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state.overrides));
+            } catch (e) {
+                // Negeer storage quota fouten
+            }
+        }
+
+        // =========================================================================
+        // TARIEFBEREKENING (ANWB Abo, Eneco Abo, Vattenfall Zonder Abo)
+        // =========================================================================
+        function calculateCardPrices(station) {
+            const kwh = state.kwh;
+            const isPeak = state.timeTariff === 'piek';
+            const results = [];
+
+            // Controleer of gebruiker handmatig een tarief voor deze paal heeft opgeslagen
+            const override = state.overrides[station.id];
+            const effectiveCpo = override ? override.cpo : station.cpo;
+            let effectiveCpoRate = override ? parseFloat(override.rate) : station.cpoRate;
+
+            if (!override && station.mraType === 'MRA2024') {
+                effectiveCpoRate = isPeak ? 0.3594 : 0.3394;
+            }
+
+            // 1. ANWB Laadpas (Met abonnement: €0,00 start, 1-op-1 CPO, 10% korting Fastned)
+            if (state.activeCards.anwb) {
+                let rate = effectiveCpoRate;
+                let note = '1-op-1 CPO, €0 start';
+                if (effectiveCpo === 'Fastned') {
+                    rate = effectiveCpoRate * 0.90;
+                    note = '10% Fastned-korting, €0 start';
+                }
+                results.push({
+                    id: 'anwb',
+                    name: 'ANWB Laadpas',
+                    badgeColor: 'bg-sky-600',
+                    ratePerKwh: rate,
+                    startFee: 0.00,
+                    total: rate * kwh,
+                    note: note
+                });
+            }
+
+            // 2. Eneco eMobility (Met abonnement: €0,00 start, vaste CPO-staffels)
+            if (state.activeCards.eneco) {
+                let rate = 0.48;
+                let note = 'Vast Eneco AC-tarief';
+                if (station.type === 'AC') {
+                    if (effectiveCpo === 'Eneco eMobility') {
+                        rate = 0.42;
+                        note = 'Eigen Eneco AC-tarief';
+                    } else if (effectiveCpo === 'Allego') {
+                        rate = 0.63;
+                        note = 'Vast Allego AC-tarief';
+                    } else {
+                        rate = 0.48;
+                        note = 'Vast overig AC-tarief';
+                    }
+                } else {
+                    if (effectiveCpo === 'Eneco eMobility') {
+                        rate = 0.66;
+                        note = 'Eigen Eneco DC-tarief';
+                    } else if (effectiveCpo === 'Tesla') {
+                        rate = 0.69;
+                        note = 'Vast Tesla DC-tarief';
+                    } else if (effectiveCpo === 'Fastned') {
+                        rate = 0.77;
+                        note = 'Vast Fastned DC-tarief';
+                    } else {
+                        rate = 0.80;
+                        note = 'Vast overig DC-tarief';
+                    }
+                }
+                results.push({
+                    id: 'eneco',
+                    name: 'Eneco eMobility',
+                    badgeColor: 'bg-rose-600',
+                    ratePerKwh: rate,
+                    startFee: 0.00,
+                    total: rate * kwh,
+                    note: note
+                });
+            }
+
+            // 3. Vattenfall InCharge (Zonder abonnement: €0 start op Vattenfall, €0,35 elders)
+            if (state.activeCards.vattenfall) {
+                let rate = effectiveCpoRate;
+                let startFee = 0.00;
+                let note = '';
+
+                if (effectiveCpo === 'Vattenfall InCharge') {
+                    startFee = 0.00;
+                    if (!override && station.mraType === 'MRA2024') {
+                        rate = isPeak ? 0.3594 : 0.3394;
+                        note = isPeak ? 'MRA Piek, €0 start' : 'MRA Dal, €0 start';
+                    } else if (!override && station.mraType === 'MRA2021') {
+                        rate = 0.5222;
+                        note = 'MRA 2021, €0 start';
+                    } else {
+                        note = 'Eigen netwerk, €0 start';
+                    }
+                } else {
+                    startFee = 0.35;
+                    note = 'Incl. €0,35 starttarief';
+                }
+
+                results.push({
+                    id: 'vattenfall',
+                    name: 'Vattenfall InCharge',
+                    badgeColor: 'bg-amber-500',
+                    ratePerKwh: rate,
+                    startFee: startFee,
+                    total: startFee + (rate * kwh),
+                    note: note
+                });
+            }
+
+            results.sort((a, b) => a.total - b.total);
+            return { results, effectiveCpo, effectiveCpoRate, isOverridden: !!override };
+        }
+
+        // =========================================================================
+        // LIVE OVERPASS API (ECHTE OPENBARE LAADPALEN OP LOCATIE) + FALLBACK
+        // =========================================================================
+        function normalizeOperator(rawOperator, rawName, isMraRegion) {
+            const combined = `${rawOperator || ''} ${rawName || ''}`.toLowerCase();
+            if (combined.includes('vattenfall') || combined.includes('nuon') || combined.includes('mra')) {
+                return { cpo: 'Vattenfall InCharge', rate: isMraRegion ? 0.3394 : 0.44, mraType: isMraRegion ? 'MRA2024' : 'STANDARD' };
+            }
+            if (combined.includes('eneco')) {
+                return { cpo: 'Eneco eMobility', rate: 0.43, mraType: 'STANDARD' };
+            }
+            if (combined.includes('equans') || combined.includes('engie')) {
+                return { cpo: 'EQUANS', rate: 0.41, mraType: 'STANDARD' };
+            }
+            if (combined.includes('allego')) {
+                return { cpo: 'Allego', rate: 0.49, mraType: 'STANDARD' };
+            }
+            if (combined.includes('total')) {
+                return { cpo: 'TotalEnergies', rate: 0.42, mraType: 'STANDARD' };
+            }
+            if (combined.includes('shell') || combined.includes('newmotion')) {
+                return { cpo: 'Shell Recharge', rate: 0.47, mraType: 'STANDARD' };
+            }
+            if (combined.includes('pitpoint')) {
+                return { cpo: 'PitPoint', rate: 0.42, mraType: 'STANDARD' };
+            }
+            if (combined.includes('fastned')) {
+                return { cpo: 'Fastned', rate: 0.74, mraType: 'STANDARD' };
+            }
+            if (combined.includes('tesla')) {
+                return { cpo: 'Tesla', rate: 0.49, mraType: 'STANDARD' };
+            }
+            // Standaard publieke exploitant in Nederland
+            if (isMraRegion) {
+                return { cpo: 'Vattenfall InCharge', rate: 0.3394, mraType: 'MRA2024' };
+            }
+            return { cpo: rawOperator || 'Publieke Laadpaal', rate: 0.44, mraType: 'STANDARD' };
+        }
+
+        async function fetchRealStations(lat, lng, cityName) {
+            const loader = document.getElementById('loading-indicator');
+            const grid = document.getElementById('stations-grid');
+            const badge = document.getElementById('data-source-badge');
+
+            loader.classList.remove('hidden');
+            grid.innerHTML = '';
+
+            const lowerCity = cityName.toLowerCase();
+            const isMraRegion = ['amsterdam', 'diemen', 'weesp', 'haarlem', 'zaandam', 'almere', 'amstelveen', 'hoofddorp', 'hilversum', 'schiphol'].some(c => lowerCity.includes(c));
+
+            try {
+                // Overpass API query voor laadpalen binnen 1800 meter
+                const query = `[out:json][timeout:8];node["amenity"="charging_station"](around:1800,${lat},${lng});out 25;`;
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 7500);
+
+                const res = await fetch('https://overpass-api.de/api/interpreter', {
+                    method: 'POST',
+                    body: query,
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+
+                if (!res.ok) throw new Error('Overpass niet bereikbaar');
+                const data = await res.json();
+
+                if (data.elements && data.elements.length > 0) {
+                    const parsed = data.elements.map((el) => {
+                        const tags = el.tags || {};
+                        const isDc = !!(tags['socket:chademo'] || tags['socket:type2_combo'] || (tags['socket:type2:output'] && parseInt(tags['socket:type2:output'], 10) >= 50));
+                        const norm = normalizeOperator(tags.operator || tags.brand || tags.network, tags.name, isMraRegion);
+                        const street = tags['addr:street'] ? `${tags['addr:street']} ${tags['addr:housenumber'] || ''}`.trim() : '';
+                        const title = tags.name || street || `${norm.cpo} Laadpunt`;
+                        const capacity = tags.capacity || tags['socket:type2'] || '2';
+                        const output = isDc ? '150-300 kW (CCS2)' : (tags['socket:type2:output'] || '11 kW (Type 2)');
+                        const dist = Math.round(calculateDistanceMeters(lat, lng, el.lat, el.lon));
+
+                        return {
+                            id: `osm-${el.id}`,
+                            name: title,
+                            cpo: isDc && norm.cpo === 'Vattenfall InCharge' ? 'Fastned' : norm.cpo,
+                            type: isDc ? 'DC' : 'AC',
+                            power: `${output} • ${capacity} aansl.`,
+                            cpoRate: isDc && norm.rate < 0.55 ? 0.74 : norm.rate,
+                            mraType: isDc ? 'STANDARD' : norm.mraType,
+                            lat: el.lat,
+                            lng: el.lon,
+                            distanceMeters: dist
+                        };
+                    }).sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 15);
+
+                    state.stations = parsed;
+                    badge.innerHTML = `<i class="fa-solid fa-satellite-dish text-emerald-400 mr-1"></i>Live OSM (${parsed.length})`;
+                    loader.classList.add('hidden');
+                    renderStations();
+                    return;
+                }
+            } catch (err) {
+                // Val terug op realistische buurtlaadpalen bij netwerkvertraging
+            }
+
+            // Fallback dataset voor directe werking zonder wachttijd
+            state.stations = generateFallbackStations(lat, lng, cityName, isMraRegion);
+            badge.innerHTML = `<i class="fa-solid fa-bolt text-amber-400 mr-1"></i>Regio-data`;
+            loader.classList.add('hidden');
+            renderStations();
+        }
+
+        function generateFallbackStations(lat, lng, cityName, isMraRegion) {
+            const templates = [
+                { name: `${cityName} Centrum - Publieke Laadpaal`, cpo: 'Vattenfall InCharge', type: 'AC', power: '11 kW (2x Type 2)', cpoRate: isMraRegion ? 0.3394 : 0.44, mraType: isMraRegion ? 'MRA2024' : 'STANDARD', dLat: 0.0018, dLng: 0.0022 },
+                { name: `${cityName} Station / P+R`, cpo: 'EQUANS', type: 'AC', power: '11 kW (2x Type 2)', cpoRate: 0.41, mraType: 'STANDARD', dLat: -0.0025, dLng: 0.0021 },
+                { name: `${cityName} Winkelcentrum`, cpo: 'Allego', type: 'AC', power: '22 kW (2x Type 2)', cpoRate: 0.49, mraType: 'STANDARD', dLat: 0.0031, dLng: -0.0026 },
+                { name: `${cityName} Woonwijk Concessiepaal`, cpo: 'Vattenfall InCharge', type: 'AC', power: '11 kW (2x Type 2)', cpoRate: isMraRegion ? 0.5222 : 0.46, mraType: isMraRegion ? 'MRA2021' : 'STANDARD', dLat: -0.0016, dLng: -0.0035 },
+                { name: `${cityName} Gemeentehuis`, cpo: 'Eneco eMobility', type: 'AC', power: '11 kW (2x Type 2)', cpoRate: 0.43, mraType: 'STANDARD', dLat: 0.0039, dLng: 0.0015 },
+                { name: `Fastned ${cityName} Snellader`, cpo: 'Fastned', type: 'DC', power: '300 kW (CCS2)', cpoRate: 0.74, mraType: 'STANDARD', dLat: 0.0065, dLng: -0.0055 }
+            ];
+
+            return templates.map((t, i) => {
+                const sLat = lat + t.dLat;
+                const sLng = lng + t.dLng;
+                return {
+                    id: `fb-${cityName.toLowerCase().replace(/\s+/g, '-')}-${i}`,
+                    name: t.name,
+                    cpo: t.cpo,
+                    type: t.type,
+                    power: t.power,
+                    cpoRate: t.cpoRate,
+                    mraType: t.mraType,
+                    lat: sLat,
+                    lng: sLng,
+                    distanceMeters: Math.round(calculateDistanceMeters(lat, lng, sLat, sLng))
+                };
+            }).sort((a, b) => a.distanceMeters - b.distanceMeters);
+        }
+
+        function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+            const R = 6371e3;
+            const p1 = lat1 * Math.PI / 180;
+            const p2 = lat2 * Math.PI / 180;
+            const dp = (lat2 - lat1) * Math.PI / 180;
+            const dl = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dp / 2) * Math.sin(dp / 2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) * Math.sin(dl / 2);
+            return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+        }
+
+        function formatDistance(m) {
+            return m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1).replace('.', ',')} km`;
+        }
+
+        function formatEuro(v) {
+            return `€${v.toFixed(2).replace('.', ',')}`;
+        }
+
+        function formatRate(r) {
+            return `€${r.toFixed(4).replace('.', ',')}`;
+        }
+
+        // =========================================================================
+        // GPS & GEOCODING
+        // =========================================================================
+        function useCurrentGPS() {
+            if (!navigator.geolocation) {
+                showToast('GPS wordt niet ondersteund op dit apparaat.', 'error');
+                return;
+            }
+            const btn = document.getElementById('btn-gps');
+            const orig = btn.innerHTML;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> <span>GPS-locatie bepalen...</span>`;
+            btn.disabled = true;
+
+            navigator.geolocation.getCurrentPosition(
+                async (pos) => {
+                    const { latitude, longitude } = pos.coords;
+                    let name = `GPS (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+                    try {
+                        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=14&addressdetails=1`, {
+                            headers: { 'Accept-Language': 'nl' }
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            const a = data.address || {};
+                            const city = a.city || a.town || a.village || a.municipality || 'Mijn locatie';
+                            const road = a.road ? `, ${a.road}` : '';
+                            name = `${city}${road}`;
+                        }
+                    } catch (e) {}
+
+                    document.getElementById('location-input').value = name;
+                    updateLocation(latitude, longitude, name);
+                    btn.innerHTML = orig;
+                    btn.disabled = false;
+                    showToast(`Laadpalen geladen bij ${name}`, 'success');
+                },
+                () => {
+                    btn.innerHTML = orig;
+                    btn.disabled = false;
+                    showToast('Geen GPS-toegang. Geef locatietoestemming of kies een plaats.', 'error');
+                },
+                { enableHighAccuracy: true, timeout: 10000 }
+            );
+        }
+
+        async function searchLocation() {
+            const q = document.getElementById('location-input').value.trim();
+            if (!q) {
+                showToast('Voer een plaatsnaam of postcode in.', 'error');
+                return;
+            }
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=nl&limit=1&q=${encodeURIComponent(q)}`, {
+                    headers: { 'Accept-Language': 'nl' }
+                });
+                const list = await res.json();
+                if (list && list.length > 0) {
+                    const clean = list[0].display_name.split(',').slice(0, 2).join(', ');
+                    updateLocation(parseFloat(list[0].lat), parseFloat(list[0].lon), clean);
+                } else {
+                    showToast('Locatie niet gevonden in Nederland.', 'error');
+                }
+            } catch (e) {
+                showToast('Zoeken mislukt. Controleer je internetverbinding.', 'error');
+            }
+        }
+
+        function quickCity(name, lat, lng) {
+            document.getElementById('location-input').value = name;
+            updateLocation(lat, lng, name);
+        }
+
+        function updateLocation(lat, lng, name) {
+            state.lat = lat;
+            state.lng = lng;
+            state.locationName = name;
+            document.getElementById('current-city-text').textContent = name;
+            document.getElementById('link-laadprijzen').href = `https://laadprijzen.nl/?q=${encodeURIComponent(name)}`;
+            fetchRealStations(lat, lng, name);
+        }
+
+        // =========================================================================
+        // HANDMATIGE TARIEF-AANPASSING PER PAAL (MODAL + LOCALSTORAGE)
+        // =========================================================================
+        function openEditModal(stationId) {
+            const station = state.stations.find(s => s.id === stationId);
+            if (!station) return;
+            state.editingStationId = stationId;
+
+            const override = state.overrides[stationId];
+            document.getElementById('modal-station-title').textContent = station.name;
+            document.getElementById('modal-cpo').value = override ? override.cpo : station.cpo;
+            document.getElementById('modal-rate').value = override ? override.rate : station.cpoRate;
+
+            const modal = document.getElementById('edit-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeEditModal() {
+            const modal = document.getElementById('edit-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            state.editingStationId = null;
+        }
+
+        function saveStationOverride() {
+            if (!state.editingStationId) return;
+            const cpo = document.getElementById('modal-cpo').value;
+            const rate = parseFloat(document.getElementById('modal-rate').value);
+            if (isNaN(rate) || rate <= 0) {
+                showToast('Voer een geldig kWh-tarief in.', 'error');
+                return;
+            }
+            state.overrides[state.editingStationId] = { cpo, rate };
+            saveOverridesToStorage();
+            closeEditModal();
+            renderStations();
+            showToast('Paaltarief opgeslagen op dit toestel.', 'success');
+        }
+
+        function resetStationOverride() {
+            if (!state.editingStationId) return;
+            delete state.overrides[state.editingStationId];
+            saveOverridesToStorage();
+            closeEditModal();
+            renderStations();
+            showToast('Standaardtarief hersteld.', 'success');
+        }
+
+        // =========================================================================
+        // RENDERING VAN DE LAADPAALKAARTEN
+        // =========================================================================
+        function updateKwh(val) {
+            state.kwh = parseInt(val, 10);
+            document.getElementById('kwh-display').textContent = state.kwh;
+            renderStations();
+        }
+
+        function setKwh(val) {
+            document.getElementById('kwh-slider').value = val;
+            updateKwh(val);
+        }
+
+        function recalculateAll() {
+            state.timeTariff = document.getElementById('time-tariff').value;
+            state.activeCards.anwb = document.getElementById('toggle-anwb').checked;
+            state.activeCards.eneco = document.getElementById('toggle-eneco').checked;
+            state.activeCards.vattenfall = document.getElementById('toggle-vattenfall').checked;
+            renderStations();
+        }
+
+        function renderStations() {
+            const typeFilter = document.getElementById('filter-type').value;
+            const filtered = state.stations.filter(s => typeFilter === 'ALL' || s.type === typeFilter);
+            document.getElementById('station-count').textContent = filtered.length;
+
+            const grid = document.getElementById('stations-grid');
+            if (filtered.length === 0) {
+                grid.innerHTML = `<div class="bg-white rounded-2xl border border-slate-200 p-6 text-center text-sm text-slate-600">Geen laadpalen gevonden voor dit filter.</div>`;
+                return;
+            }
+
+            grid.innerHTML = filtered.map(station => {
+                const { results, effectiveCpo, isOverridden } = calculateCardPrices(station);
+                const best = results[0];
+                const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${station.lat},${station.lng}`;
+
+                const typeBadge = station.type === 'DC'
+                    ? `<span class="bg-amber-100 text-amber-800 text-[11px] font-extrabold px-2 py-0.5 rounded-md">DC Snellader</span>`
+                    : `<span class="bg-blue-100 text-blue-800 text-[11px] font-extrabold px-2 py-0.5 rounded-md">AC Type 2</span>`;
+
+                const rowsHtml = results.map((p, idx) => {
+                    const isBest = idx === 0;
+                    const diff = p.total - best.total;
+                    return `
+                        <div class="flex items-center justify-between px-3 py-2.5 rounded-xl border ${isBest ? 'bg-emerald-50 border-emerald-400' : 'bg-slate-50 border-slate-200'}">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="w-2 h-7 rounded-full ${p.badgeColor} shrink-0"></span>
+                                <div class="min-w-0">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="font-bold text-xs text-slate-900 truncate">${p.name}</span>
+                                        ${isBest ? `<span class="bg-emerald-600 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase">Beste</span>` : ''}
+                                    </div>
+                                    <div class="text-[11px] text-slate-500 truncate">${formatRate(p.ratePerKwh)}/kWh • ${p.note}</div>
+                                </div>
+                            </div>
+                            <div class="text-right shrink-0 ml-2">
+                                <div class="font-extrabold text-sm ${isBest ? 'text-emerald-700' : 'text-slate-800'}">${formatEuro(p.total)}</div>
+                                <div class="text-[10px] font-semibold ${isBest ? 'text-emerald-600' : 'text-slate-400'}">
+                                    ${isBest ? `${state.kwh} kWh` : `+${formatEuro(diff)}`}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                return `
+                    <article class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 space-y-3">
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="min-w-0">
+                                <div class="flex flex-wrap items-center gap-1.5 mb-1">
+                                    ${typeBadge}
+                                    <span class="bg-slate-100 text-slate-800 text-[11px] font-bold px-2 py-0.5 rounded-md">${effectiveCpo}</span>
+                                    ${isOverridden ? `<span class="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded-md">Aangepast</span>` : ''}
+                                </div>
+                                <h3 class="font-bold text-sm sm:text-base text-slate-900 leading-snug">${station.name}</h3>
+                                <p class="text-xs text-slate-500 mt-0.5">${station.power} • Op <strong>${formatDistance(station.distanceMeters)}</strong></p>
+                            </div>
+                            <div class="flex items-center gap-1.5 shrink-0">
+                                <button onclick="openEditModal('${station.id}')" class="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold" title="Paaltarief aanpassen">
+                                    <i class="fa-solid fa-pen"></i> Tarief
+                                </button>
+                                <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" class="px-3 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold" title="Open route in Google Maps">
+                                    <i class="fa-solid fa-diamond-turn-right"></i> Route
+                                </a>
+                            </div>
+                        </div>
+
+                        <div class="space-y-1.5">
+                            ${rowsHtml}
+                        </div>
+                    </article>
+                `;
+            }).join('');
+        }
+
+        function showToast(msg, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const el = document.createElement('div');
+            el.className = `${type === 'error' ? 'bg-rose-900' : 'bg-slate-900'} text-white px-4 py-3 rounded-xl shadow-lg text-xs font-semibold flex items-center gap-2 pointer-events-auto`;
+            el.innerHTML = `<i class="fa-solid ${type === 'error' ? 'fa-circle-exclamation text-rose-400' : 'fa-circle-check text-emerald-400'}"></i><span>${msg}</span>`;
+            container.appendChild(el);
+            setTimeout(() => el.remove(), 3500);
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            fetchRealStations(state.lat, state.lng, state.locationName);
+        });
+    </script>
+</body>
+</html>
